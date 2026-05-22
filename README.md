@@ -2,14 +2,22 @@
 
 Rust terminal and web viewer for `gpu_trace_stats.sqlite` databases produced by the Python importer.
 
+## Install
+
+```bash
+cargo install --path . --force
+```
+
+This installs `gpu-trace-viewer` into `~/.cargo/bin`.
+
 ## Commands
 
 ```bash
-cargo run -- --db ../gpu_trace_stats.sqlite tui
-cargo run -- --db ../gpu_trace_stats.sqlite serve --host 127.0.0.1 --port 8766
-cargo run -- --db ../gpu_trace_stats.sqlite runs
-cargo run -- --db ../gpu_trace_stats.sqlite top --by first --limit 10
-cargo run -- --db ../gpu_trace_stats.sqlite calls --call-order 10
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite tui
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite serve --host 127.0.0.1 --port 8766
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite runs
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite top --by first --limit 10
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite calls --call-order 10
 ```
 
 If `--db` is omitted, the binary looks for `gpu_trace_stats.sqlite` in the current directory and then `../gpu_trace_stats.sqlite`.
