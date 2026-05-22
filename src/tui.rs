@@ -31,7 +31,6 @@ enum InputMode {
 }
 
 struct App {
-    db_path: PathBuf,
     db: Db,
     runs: Vec<RunRow>,
     run_idx: usize,
@@ -51,7 +50,6 @@ struct App {
     sort: SortSpec,
     summary_limit: i64,
     calls_limit: i64,
-    status: String,
 }
 
 impl App {
@@ -59,7 +57,6 @@ impl App {
         let db = Db::open_readonly(&db_path)?;
         let runs = db.runs()?;
         let mut app = Self {
-            db_path,
             db,
             runs,
             run_idx: 0,
@@ -79,7 +76,6 @@ impl App {
             sort: SortSpec::from_key("device"),
             summary_limit,
             calls_limit,
-            status: String::new(),
         };
         app.reload_all()?;
         Ok(app)
@@ -107,9 +103,6 @@ impl App {
             self.totals = self.db.totals(run_id)?;
             self.reload_summary()?;
             self.reload_calls()?;
-            self.status = format!("loaded run {run_id} from {}", self.db_path.display());
-        } else {
-            self.status = "no runs in database".to_string();
         }
         Ok(())
     }
@@ -368,26 +361,9 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
         ])
         .split(frame.area());
 
-    let top = format!(
-        "{} | sort: {} | filter: {} | op: {} | call_order: {}\nunique ops: {}  calls: {}  device ms: {:.3}  free ms: {:.3}  occ %: {}\nkeys: q quit  tab focus  summary cursor auto-loads calls  / filter  g call order  s sort  r run  c clear",
-        app.run_label(),
-        app.sort.label,
-        empty_dash(&app.filter),
-        empty_dash(app.selected_op.as_deref().unwrap_or("")),
-        app.call_order
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        app.totals.unique_ops,
-        app.totals.call_count,
-        app.totals.total_device_time_us / 1000.0,
-        app.totals.total_free_time_us / 1000.0,
-        app.totals
-            .avg_occupancy_pct
-            .map(|v| format!("{v:.3}"))
-            .unwrap_or_else(|| "-".to_string()),
-    );
     frame.render_widget(
-        Paragraph::new(top).block(Block::default().borders(Borders::BOTTOM)),
+        Paragraph::new(top_lines(app, root[0].width))
+            .block(Block::default().borders(Borders::BOTTOM)),
         root[0],
     );
 
@@ -406,12 +382,106 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
     draw_context(frame, right[1], app);
 
     let prompt = match app.input_mode {
-        InputMode::Normal => app.status.clone(),
-        InputMode::Filter => format!("filter> {}", app.input),
-        InputMode::CallOrder => format!("call_order> {}", app.input),
+        InputMode::Normal => Line::default(),
+        InputMode::Filter => input_line("filter", &app.input),
+        InputMode::CallOrder => input_line("call_order", &app.input),
     };
     frame.render_widget(Paragraph::new(prompt), root[2]);
     draw_call_stats(frame, root[3], app);
+}
+
+fn top_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let label = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let metric = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD);
+    let key = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let sep = Style::default().fg(Color::DarkGray);
+    let value = Style::default().fg(Color::White);
+    let filter = empty_dash(&app.filter);
+    let call_order = app
+        .call_order
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let fixed_width = " | sort  | filter  | call_order ".chars().count()
+        + app.sort.label.chars().count()
+        + filter.chars().count().min(12)
+        + call_order.chars().count();
+    let run_width = (usize::from(width).saturating_sub(fixed_width)).clamp(12, 48);
+
+    vec![
+        Line::from(vec![
+            Span::styled(trunc(&app.run_label(), run_width), value),
+            Span::styled(" | ", sep),
+            Span::styled("sort ", label),
+            Span::styled(app.sort.label.to_string(), value),
+            Span::styled(" | ", sep),
+            Span::styled("filter ", label),
+            Span::styled(trunc(&filter, 12), value),
+            Span::styled(" | ", sep),
+            Span::styled("call_order ", label),
+            Span::styled(call_order, value),
+        ]),
+        Line::from(vec![
+            Span::styled("unique ops ", metric),
+            Span::styled(app.totals.unique_ops.to_string(), value),
+            Span::styled("  calls ", metric),
+            Span::styled(app.totals.call_count.to_string(), value),
+            Span::styled("  device ms ", metric),
+            Span::styled(
+                format!("{:.3}", app.totals.total_device_time_us / 1000.0),
+                value,
+            ),
+            Span::styled("  free ms ", metric),
+            Span::styled(
+                format!("{:.3}", app.totals.total_free_time_us / 1000.0),
+                value,
+            ),
+            Span::styled("  occ % ", metric),
+            Span::styled(
+                app.totals
+                    .avg_occupancy_pct
+                    .map(|v| format!("{v:.3}"))
+                    .unwrap_or_else(|| "-".to_string()),
+                value,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("keys ", label),
+            Span::styled("q", key),
+            Span::raw(" quit  "),
+            Span::styled("tab", key),
+            Span::raw(" focus  "),
+            Span::styled("j/k", key),
+            Span::raw(" move  "),
+            Span::styled("/", key),
+            Span::raw(" filter  "),
+            Span::styled("g", key),
+            Span::raw(" call order  "),
+            Span::styled("s", key),
+            Span::raw(" sort  "),
+            Span::styled("r", key),
+            Span::raw(" run  "),
+            Span::styled("c", key),
+            Span::raw(" clear"),
+        ]),
+    ]
+}
+
+fn input_line(label: &'static str, input: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label}> "),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(input.to_string(), Style::default().fg(Color::White)),
+    ])
 }
 
 fn draw_summary(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
