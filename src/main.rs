@@ -1,4 +1,5 @@
 mod db;
+mod importer;
 mod tui;
 mod web;
 
@@ -8,6 +9,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::db::{Db, SortSpec};
+use crate::importer::{ImportCsvOptions, ImportTraceOptions, import_csv, import_trace};
 
 #[derive(Debug, Parser)]
 #[command(name = "gpu-trace-viewer")]
@@ -58,6 +60,37 @@ enum Command {
         limit: i64,
         #[arg(long, default_value_t = 0)]
         offset: i64,
+    },
+    ImportTrace {
+        trace: PathBuf,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long, default_value = "kernel")]
+        categories: String,
+        #[arg(long)]
+        all_categories: bool,
+        #[arg(long)]
+        include_name: Option<String>,
+        #[arg(long)]
+        exclude_name: Option<String>,
+        #[arg(long, alias = "min-duration-us", default_value_t = 0.0)]
+        min_device_time_us: f64,
+        #[arg(long, default_value_t = 1000)]
+        batch_size: usize,
+        #[arg(long, default_value_t = 100_000)]
+        progress_interval: i64,
+    },
+    ImportCsv {
+        csv: PathBuf,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long, default_value_t = 1000)]
+        batch_size: usize,
+        #[arg(long, default_value_t = 100_000)]
+        progress_interval: i64,
+    },
+    DeleteRun {
+        run_id: i64,
     },
 }
 
@@ -167,6 +200,55 @@ fn main() -> Result<()> {
                     row.op_name
                 );
             }
+            Ok(())
+        }
+        Command::ImportTrace {
+            trace,
+            label,
+            categories,
+            all_categories,
+            include_name,
+            exclude_name,
+            min_device_time_us,
+            batch_size,
+            progress_interval,
+        } => {
+            let mut options = ImportTraceOptions::new(db_path, trace);
+            options.label = label;
+            options.categories = categories;
+            options.all_categories = all_categories;
+            options.include_name = include_name;
+            options.exclude_name = exclude_name;
+            options.min_device_time_us = min_device_time_us;
+            options.batch_size = batch_size;
+            options.progress_interval = progress_interval;
+            let result = import_trace(options)?;
+            println!("db: {}", result.db_path.display());
+            println!("run_id: {}", result.run_id);
+            println!("gpu_calls: {}", result.gpu_calls);
+            println!("unique_ops: {}", result.unique_ops);
+            Ok(())
+        }
+        Command::ImportCsv {
+            csv,
+            label,
+            batch_size,
+            progress_interval,
+        } => {
+            let mut options = ImportCsvOptions::new(db_path, csv);
+            options.label = label;
+            options.batch_size = batch_size;
+            options.progress_interval = progress_interval;
+            let result = import_csv(options)?;
+            println!("db: {}", result.db_path.display());
+            println!("run_id: {}", result.run_id);
+            println!("gpu_calls: {}", result.gpu_calls);
+            println!("unique_ops: {}", result.unique_ops);
+            Ok(())
+        }
+        Command::DeleteRun { run_id } => {
+            Db::delete_run(&db_path, run_id)?;
+            println!("deleted run_id: {run_id}");
             Ok(())
         }
     }

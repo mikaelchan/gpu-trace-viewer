@@ -1,9 +1,81 @@
+use std::collections::HashSet;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OpenFlags, params, params_from_iter};
 use serde::Serialize;
+
+const SCHEMA: &str = r#"
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT,
+    source_type TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    source_size_bytes INTEGER,
+    imported_at TEXT NOT NULL,
+    app_version TEXT NOT NULL,
+    categories TEXT NOT NULL,
+    include_name TEXT,
+    exclude_name TEXT,
+    min_device_time_us REAL NOT NULL DEFAULT 0,
+    total_calls INTEGER NOT NULL DEFAULT 0,
+    unique_ops INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS gpu_calls (
+    run_id INTEGER NOT NULL,
+    call_order INTEGER NOT NULL,
+    op_call_index INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    op_name TEXT NOT NULL,
+    device_time_us REAL NOT NULL,
+    occupancy_pct REAL,
+    free_time_us REAL NOT NULL,
+    total_time_us REAL NOT NULL,
+    start_ts_us REAL,
+    end_ts_us REAL,
+    device TEXT,
+    stream TEXT,
+    pid TEXT,
+    tid TEXT,
+    correlation TEXT,
+    external_id TEXT,
+    PRIMARY KEY (run_id, call_order),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS op_summary (
+    run_id INTEGER NOT NULL,
+    first_call_order INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    op_name TEXT NOT NULL,
+    call_count INTEGER NOT NULL,
+    total_device_time_us REAL NOT NULL,
+    total_free_time_us REAL NOT NULL,
+    total_time_us REAL NOT NULL,
+    avg_device_time_us REAL NOT NULL,
+    avg_free_time_us REAL NOT NULL,
+    avg_time_us REAL NOT NULL,
+    avg_occupancy_pct REAL,
+    min_occupancy_pct REAL,
+    max_occupancy_pct REAL,
+    min_device_time_us REAL NOT NULL,
+    min_free_time_us REAL NOT NULL,
+    min_time_us REAL NOT NULL,
+    max_device_time_us REAL NOT NULL,
+    max_free_time_us REAL NOT NULL,
+    max_time_us REAL NOT NULL,
+    PRIMARY KEY (run_id, category, op_name),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_calls_run_name ON gpu_calls(run_id, op_name);
+CREATE INDEX IF NOT EXISTS idx_calls_run_device_stream ON gpu_calls(run_id, device, stream, call_order);
+CREATE INDEX IF NOT EXISTS idx_calls_run_time ON gpu_calls(run_id, start_ts_us);
+CREATE INDEX IF NOT EXISTS idx_summary_run_device ON op_summary(run_id, total_device_time_us DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_run_free ON op_summary(run_id, total_free_time_us DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_run_total ON op_summary(run_id, total_time_us DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_run_count ON op_summary(run_id, call_count DESC);
+"#;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunRow {
@@ -162,7 +234,7 @@ impl CallStats {
 }
 
 pub struct Db {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Db {
@@ -176,8 +248,46 @@ impl Db {
     pub fn open_readwrite(path: &Path) -> Result<Self> {
         let conn =
             Connection::open(path).with_context(|| format!("open sqlite db {}", path.display()))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        Ok(Self { conn })
+        conn.execute_batch(SCHEMA)?;
+        let db = Self { conn };
+        db.ensure_schema()?;
+        Ok(db)
+    }
+
+    pub fn tune_for_import(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;",
+        )?;
+        Ok(())
+    }
+
+    fn ensure_schema(&self) -> Result<()> {
+        let call_columns = self.columns("gpu_calls")?;
+        if !call_columns.is_empty() && !call_columns.contains("occupancy_pct") {
+            self.conn
+                .execute_batch("ALTER TABLE gpu_calls ADD COLUMN occupancy_pct REAL;")?;
+        }
+
+        let summary_columns = self.columns("op_summary")?;
+        for column in [
+            "avg_occupancy_pct",
+            "min_occupancy_pct",
+            "max_occupancy_pct",
+        ] {
+            if !summary_columns.is_empty() && !summary_columns.contains(column) {
+                self.conn
+                    .execute_batch(&format!("ALTER TABLE op_summary ADD COLUMN {column} REAL;"))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn columns(&self, table: &str) -> Result<HashSet<String>> {
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<HashSet<_>>>()?;
+        Ok(rows)
     }
 
     pub fn runs(&self) -> Result<Vec<RunRow>> {
@@ -356,8 +466,12 @@ impl Db {
 
     pub fn delete_run(path: &Path, run_id: i64) -> Result<()> {
         let db = Self::open_readwrite(path)?;
-        db.conn
+        let changed = db
+            .conn
             .execute("DELETE FROM runs WHERE id = ?", params![run_id])?;
+        if changed == 0 {
+            bail!("run {run_id} not found");
+        }
         Ok(())
     }
 }

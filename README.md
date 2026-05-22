@@ -14,6 +14,9 @@ This installs `gpu-trace-viewer` into `~/.cargo/bin`.
 
 ```bash
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite import-trace --label before /path/to/profile.trace.json.gz
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite import-csv --label before /path/to/calls.csv
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite delete-run 4
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite tui --summary-limit 500 --calls-limit 500
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite serve --host 127.0.0.1 --port 8766
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite runs
@@ -43,9 +46,13 @@ The bottom stats row shows device-time count, total, min, mean, max, p50, p75, p
 
 ## Web Server
 
-The Rust web server reuses the same SQLite query layer as the TUI and exposes:
+The Rust web server reuses the same SQLite import/query/delete layer as the TUI and exposes:
 
+- Browser controls for importing a trace JSON/GZ path or calls CSV path
+- Browser deletion for the selected run
 - `/api/runs`
+- `/api/import-trace` via `POST {"trace": "/path/to/file.trace.json.gz"}`
+- `/api/import-csv` via `POST {"csv": "/path/to/calls.csv"}`
 - `/api/summary`
 - `/api/calls`
 - `/api/call-context`
@@ -53,4 +60,4 @@ The Rust web server reuses the same SQLite query layer as the TUI and exposes:
 - `/download/calls.csv`
 - `/api/delete-run` via `POST {"run_id": N}`
 
-The Python trace importer is still the source of truth for creating/updating the SQLite database.
+Import and delete are available directly from the `gpu-trace-viewer` binary.
