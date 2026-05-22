@@ -525,8 +525,8 @@ fn draw_summary(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
 
 fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let header = Row::new([
-        "Order", "Dev", "Stream", "Dev us", "Free us", "Occ", "Blk/SM", "Warp/SM", "Shmem", "Grid",
-        "Block",
+        "Order", "Dev", "Stream", "Dev us", "Free us", "Occ", "Blk/SM", "Warp/SM", "ShmKiB",
+        "Grid", "Block",
     ])
     .style(
         Style::default()
@@ -543,7 +543,7 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             Cell::from(opt(row.occupancy_pct)),
             Cell::from(opt(row.blocks_per_sm)),
             Cell::from(opt(row.warps_per_sm)),
-            Cell::from(fmt_intish(row.shared_memory)),
+            Cell::from(fmt_kib(row.shared_memory)),
             Cell::from(row.grid.clone().unwrap_or_default()),
             Cell::from(row.block.clone().unwrap_or_default()),
         ])
@@ -703,13 +703,14 @@ fn fmt_us(value: Option<f64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn fmt_intish(value: Option<f64>) -> String {
+fn fmt_kib(value: Option<f64>) -> String {
     value
-        .map(|v| {
-            if (v.fract()).abs() < f64::EPSILON {
-                format!("{v:.0}")
+        .map(|bytes| {
+            let kib = bytes / 1024.0;
+            if (kib.fract()).abs() < f64::EPSILON {
+                format!("{kib:.0}")
             } else {
-                format!("{v:.3}")
+                format!("{kib:.1}")
             }
         })
         .unwrap_or_default()

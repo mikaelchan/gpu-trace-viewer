@@ -184,7 +184,7 @@ fn main() -> Result<()> {
             )?;
             println!("run_id: {run_id}");
             println!(
-                "order\tdevice\tstream\tdevice_us\tfree_us\ttotal_us\tocc_pct\tblocks_per_sm\twarps_per_sm\tshared_memory\tgrid\tblock\top"
+                "order\tdevice\tstream\tdevice_us\tfree_us\ttotal_us\tocc_pct\tblocks_per_sm\twarps_per_sm\tshared_memory_kib\tgrid\tblock\top"
             );
             for row in rows {
                 println!(
@@ -205,7 +205,7 @@ fn main() -> Result<()> {
                         .map(|v| format!("{v:.3}"))
                         .unwrap_or_default(),
                     row.shared_memory
-                        .map(|v| format!("{v:.0}"))
+                        .map(|v| format!("{:.3}", v / 1024.0))
                         .unwrap_or_default(),
                     row.grid.unwrap_or_default(),
                     row.block.unwrap_or_default(),
