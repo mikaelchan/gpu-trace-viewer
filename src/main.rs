@@ -3,10 +3,12 @@ mod importer;
 mod tui;
 mod web;
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 
 use crate::db::{Db, SortSpec};
 use crate::importer::{ImportCsvOptions, ImportTraceOptions, import_csv, import_trace};
@@ -91,6 +93,10 @@ enum Command {
     },
     DeleteRun {
         run_id: i64,
+    },
+    #[command(alias = "completion")]
+    Completions {
+        shell: Shell,
     },
 }
 
@@ -261,6 +267,12 @@ fn main() -> Result<()> {
         Command::DeleteRun { run_id } => {
             Db::delete_run(&db_path, run_id)?;
             println!("deleted run_id: {run_id}");
+            Ok(())
+        }
+        Command::Completions { shell } => {
+            let mut command = Cli::command();
+            let bin_name = command.get_name().to_string();
+            generate(shell, &mut command, bin_name, &mut io::stdout());
             Ok(())
         }
     }
