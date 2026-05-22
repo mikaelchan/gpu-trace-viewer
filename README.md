@@ -1,6 +1,9 @@
 # GPU Trace Viewer
 
-Rust terminal and web viewer for `gpu_trace_stats.sqlite` databases produced by the Python importer.
+Rust terminal and web viewer for GPU trace statistics stored in SQLite.
+
+The `gpu-trace-viewer` binary imports trace JSON/GZ files or calls CSV files directly into
+`gpu_trace_stats.sqlite`, then opens the same data in the TUI, web UI, or CLI reports.
 
 ## Preview
 
@@ -17,9 +20,9 @@ This installs `gpu-trace-viewer` into `~/.cargo/bin`.
 ## Commands
 
 ```bash
-gpu-trace-viewer --db ../gpu_trace_stats.sqlite
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite import-trace --label before /path/to/profile.trace.json.gz
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite import-csv --label before /path/to/calls.csv
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite delete-run 4
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite tui --summary-limit 500 --calls-limit 500
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite serve --host 127.0.0.1 --port 8766
@@ -30,6 +33,7 @@ gpu-trace-viewer --db ../gpu_trace_stats.sqlite calls --call-order 10
 
 If `--db` is omitted, the binary looks for `gpu_trace_stats.sqlite` in the current directory and then `../gpu_trace_stats.sqlite`.
 If no subcommand is provided, the binary opens the TUI.
+Import commands create the SQLite database if it does not already exist.
 
 ## TUI Keys
 
