@@ -71,6 +71,20 @@ pub struct CallRow {
     pub external_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct CallStats {
+    pub count: i64,
+    pub total: f64,
+    pub min: Option<f64>,
+    pub mean: Option<f64>,
+    pub max: Option<f64>,
+    pub p50: Option<f64>,
+    pub p75: Option<f64>,
+    pub p95: Option<f64>,
+    pub p99: Option<f64>,
+    pub p999: Option<f64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SortSpec {
     pub key: &'static str,
@@ -122,6 +136,28 @@ impl SortSpec {
 
     pub fn order_sql(self) -> &'static str {
         if self.ascending { "ASC" } else { "DESC" }
+    }
+}
+
+impl CallStats {
+    fn from_sorted_values(values: &[f64]) -> Self {
+        if values.is_empty() {
+            return Self::default();
+        }
+        let count = values.len() as i64;
+        let total = values.iter().sum::<f64>();
+        Self {
+            count,
+            total,
+            min: values.first().copied(),
+            mean: Some(total / count as f64),
+            max: values.last().copied(),
+            p50: percentile(values, 50.0),
+            p75: percentile(values, 75.0),
+            p95: percentile(values, 95.0),
+            p99: percentile(values, 99.0),
+            p999: percentile(values, 99.9),
+        }
     }
 }
 
@@ -272,6 +308,36 @@ impl Db {
         Ok(rows)
     }
 
+    pub fn call_stats(
+        &self,
+        run_id: i64,
+        q: Option<&str>,
+        op: Option<&str>,
+        call_order: Option<i64>,
+    ) -> Result<CallStats> {
+        let mut sql = String::from("SELECT device_time_us FROM gpu_calls WHERE run_id = ?");
+        let mut values = vec![Value::Integer(run_id)];
+        if let Some(q) = q.filter(|value| !value.is_empty()) {
+            sql.push_str(" AND op_name LIKE ?");
+            values.push(Value::Text(format!("%{q}%")));
+        }
+        if let Some(op) = op.filter(|value| !value.is_empty()) {
+            sql.push_str(" AND op_name = ?");
+            values.push(Value::Text(op.to_owned()));
+        }
+        if let Some(order) = call_order {
+            sql.push_str(" AND call_order = ?");
+            values.push(Value::Integer(order));
+        }
+        sql.push_str(" ORDER BY device_time_us ASC");
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let values = stmt
+            .query_map(params_from_iter(values.iter()), |row| row.get::<_, f64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(CallStats::from_sorted_values(&values))
+    }
+
     pub fn call_context(&self, run_id: i64, call_order: i64, radius: i64) -> Result<Vec<CallRow>> {
         let lo = 1.max(call_order - radius.max(1));
         let hi = call_order + radius.max(1);
@@ -341,4 +407,21 @@ fn map_call_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CallRow> {
         correlation: row.get("correlation")?,
         external_id: row.get("external_id")?,
     })
+}
+
+fn percentile(sorted: &[f64], percentile: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    if sorted.len() == 1 {
+        return Some(sorted[0]);
+    }
+    let rank = (percentile / 100.0) * (sorted.len() - 1) as f64;
+    let lower = rank.floor() as usize;
+    let upper = rank.ceil() as usize;
+    if lower == upper {
+        return Some(sorted[lower]);
+    }
+    let weight = rank - lower as f64;
+    Some(sorted[lower] * (1.0 - weight) + sorted[upper] * weight)
 }

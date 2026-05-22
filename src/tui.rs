@@ -14,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::{Frame, Terminal};
 
-use crate::db::{CallRow, Db, RunRow, SortSpec, SummaryRow, TotalsRow};
+use crate::db::{CallRow, CallStats, Db, RunRow, SortSpec, SummaryRow, TotalsRow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
@@ -38,6 +38,7 @@ struct App {
     summary: Vec<SummaryRow>,
     calls: Vec<CallRow>,
     context: Vec<CallRow>,
+    call_stats: CallStats,
     summary_state: TableState,
     calls_state: TableState,
     focus: Focus,
@@ -65,6 +66,7 @@ impl App {
             summary: Vec::new(),
             calls: Vec::new(),
             context: Vec::new(),
+            call_stats: CallStats::default(),
             summary_state: TableState::default(),
             calls_state: TableState::default(),
             focus: Focus::Summary,
@@ -124,6 +126,7 @@ impl App {
                 self.summary_limit,
             )?;
             select_first(&mut self.summary_state, self.summary.len());
+            self.sync_summary_selection(false);
         }
         Ok(())
     }
@@ -144,6 +147,24 @@ impl App {
             )?;
             select_first(&mut self.calls_state, self.calls.len());
             self.reload_context()?;
+            self.reload_call_stats()?;
+        }
+        Ok(())
+    }
+
+    fn reload_call_stats(&mut self) -> Result<()> {
+        self.call_stats = CallStats::default();
+        if let Some(run_id) = self.run_id() {
+            self.call_stats = self.db.call_stats(
+                run_id,
+                if self.filter.is_empty() {
+                    None
+                } else {
+                    Some(self.filter.as_str())
+                },
+                self.selected_op.as_deref(),
+                self.call_order,
+            )?;
         }
         Ok(())
     }
@@ -156,6 +177,19 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    fn sync_summary_selection(&mut self, clear_call_order: bool) {
+        if clear_call_order {
+            self.call_order = None;
+        } else if self.call_order.is_some() {
+            return;
+        }
+        self.selected_op = self
+            .summary_state
+            .selected()
+            .and_then(|idx| self.summary.get(idx))
+            .map(|row| row.op_name.clone());
     }
 
     fn next_run(&mut self) -> Result<()> {
@@ -253,6 +287,7 @@ impl App {
             KeyCode::Char('s') => {
                 self.sort = self.sort.next();
                 self.reload_summary()?;
+                self.reload_calls()?;
             }
             KeyCode::Enter => {
                 if self.focus == Focus::Summary {
@@ -262,6 +297,8 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => {
                 if self.focus == Focus::Summary {
                     move_state(&mut self.summary_state, self.summary.len(), 1);
+                    self.sync_summary_selection(true);
+                    self.reload_calls()?;
                 } else {
                     move_state(&mut self.calls_state, self.calls.len(), 1);
                     self.reload_context()?;
@@ -270,6 +307,8 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.focus == Focus::Summary {
                     move_state(&mut self.summary_state, self.summary.len(), -1);
+                    self.sync_summary_selection(true);
+                    self.reload_calls()?;
                 } else {
                     move_state(&mut self.calls_state, self.calls.len(), -1);
                     self.reload_context()?;
@@ -328,7 +367,7 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
         .split(frame.area());
 
     let top = format!(
-        "{} | sort: {} | filter: {} | op: {} | call_order: {}\nunique ops: {}  calls: {}  device ms: {:.3}  free ms: {:.3}  occ %: {}\nkeys: q quit  tab focus  enter select op  / filter  g call order  s sort  r run  c clear",
+        "{} | sort: {} | filter: {} | op: {} | call_order: {}\nunique ops: {}  calls: {}  device ms: {:.3}  free ms: {:.3}  occ %: {}\nkeys: q quit  tab focus  summary cursor auto-loads calls  / filter  g call order  s sort  r run  c clear",
         app.run_label(),
         app.sort.label,
         empty_dash(&app.filter),
@@ -359,10 +398,15 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .constraints([
+            Constraint::Min(5),
+            Constraint::Length(6),
+            Constraint::Length(8),
+        ])
         .split(body[1]);
     draw_calls(frame, right[0], app);
     draw_context(frame, right[1], app);
+    draw_call_stats(frame, right[2], app);
 
     let prompt = match app.input_mode {
         InputMode::Normal => app.status.clone(),
@@ -500,6 +544,31 @@ fn draw_context(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     frame.render_widget(table, area);
 }
 
+fn draw_call_stats(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let stats = &app.call_stats;
+    let body = format!(
+        "count {}  total {}\nmin   {}  mean {}\nmax   {}  p50  {}\np75   {}  p95  {}\np99   {}  p99.9 {}",
+        stats.count,
+        fmt_us(Some(stats.total)),
+        fmt_us(stats.min),
+        fmt_us(stats.mean),
+        fmt_us(stats.max),
+        fmt_us(stats.p50),
+        fmt_us(stats.p75),
+        fmt_us(stats.p95),
+        fmt_us(stats.p99),
+        fmt_us(stats.p999),
+    );
+    frame.render_widget(
+        Paragraph::new(body).block(
+            Block::default()
+                .title("Device time stats")
+                .borders(Borders::ALL),
+        ),
+        area,
+    );
+}
+
 fn select_first(state: &mut TableState, len: usize) {
     state.select(if len == 0 { None } else { Some(0) });
 }
@@ -528,6 +597,12 @@ fn trunc(value: &str, max: usize) -> String {
 
 fn opt(value: Option<f64>) -> String {
     value.map(|v| format!("{v:.3}")).unwrap_or_default()
+}
+
+fn fmt_us(value: Option<f64>) -> String {
+    value
+        .map(|v| format!("{v:.3}"))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn empty_dash(value: &str) -> String {

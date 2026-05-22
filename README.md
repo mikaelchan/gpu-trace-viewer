@@ -29,7 +29,8 @@ If no subcommand is provided, the binary opens the TUI.
 - `q`: quit
 - `Tab`: switch between Summary and Calls
 - `j/k` or arrow keys: move selection
-- `Enter`: select a summary op and load its calls
+- Moving the Summary selection automatically loads that kernel's calls
+- `Enter`: switch from a selected summary op to the Calls panel
 - `/`: edit kernel-name filter
 - `g`: query exact call order
 - `s`: cycle summary sort
@@ -37,6 +38,7 @@ If no subcommand is provided, the binary opens the TUI.
 - `c`: clear filter, selected op, and call-order query
 
 Selecting a call row automatically shows the `call_order +/- 5` context panel.
+The bottom-right stats panel shows device-time count, total, min, mean, max, p50, p75, p95, p99, and p99.9 for the current Calls query.
 
 ## Web Server
 
