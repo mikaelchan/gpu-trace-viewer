@@ -50,6 +50,9 @@ struct App {
     sort: SortSpec,
     summary_limit: i64,
     calls_limit: i64,
+    calls_title_scroll_key: String,
+    calls_title_scroll_offset: usize,
+    calls_title_scroll_tick: u8,
 }
 
 impl App {
@@ -76,6 +79,9 @@ impl App {
             sort: SortSpec::from_key("device"),
             summary_limit,
             calls_limit,
+            calls_title_scroll_key: String::new(),
+            calls_title_scroll_offset: 0,
+            calls_title_scroll_tick: 0,
         };
         app.reload_all()?;
         Ok(app)
@@ -171,6 +177,23 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    fn calls_title_detail(&self) -> String {
+        if self.call_order.is_some() {
+            return self
+                .calls
+                .first()
+                .map(|row| row.op_name.clone())
+                .unwrap_or_else(|| {
+                    self.call_order
+                        .map(|order| format!("call_order {order}"))
+                        .unwrap_or_else(|| "all kernels".to_string())
+                });
+        }
+        self.selected_op
+            .clone()
+            .unwrap_or_else(|| "all kernels".to_string())
     }
 
     fn sync_summary_selection(&mut self, clear_call_order: bool) {
@@ -524,6 +547,7 @@ fn draw_summary(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
 }
 
 fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
+    let title = calls_title(app, area.width);
     let header = Row::new([
         "Order", "Dev", "Stream", "Dev us", "Free us", "Occ", "Blk/SM", "Warp/SM", "ShmKiB",
         "Grid", "Block",
@@ -548,25 +572,6 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             Cell::from(row.block.clone().unwrap_or_default()),
         ])
     });
-    let title_detail = if app.call_order.is_some() {
-        app.calls
-            .first()
-            .map(|row| trunc(&row.op_name, 72))
-            .unwrap_or_else(|| {
-                app.call_order
-                    .map(|order| format!("call_order {order}"))
-                    .unwrap_or_else(|| "all kernels".to_string())
-            })
-    } else if let Some(op) = app.selected_op.as_deref() {
-        trunc(op, 72)
-    } else {
-        "all kernels".to_string()
-    };
-    let title = if app.focus == Focus::Calls {
-        format!("Calls * - {title_detail}")
-    } else {
-        format!("Calls - {title_detail}")
-    };
     let table = Table::new(
         rows,
         [
@@ -588,6 +593,56 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     .row_highlight_style(Style::default().bg(Color::DarkGray))
     .highlight_symbol("» ");
     frame.render_stateful_widget(table, area, &mut app.calls_state);
+}
+
+fn calls_title(app: &mut App, area_width: u16) -> String {
+    let prefix = if app.focus == Focus::Calls {
+        "Calls * - "
+    } else {
+        "Calls - "
+    };
+    let available = usize::from(area_width).saturating_sub(2);
+    if available <= prefix.chars().count() {
+        return trunc(prefix, available);
+    }
+
+    let detail_width = available - prefix.chars().count();
+    let detail = app.calls_title_detail();
+    let title_detail = scrolling_text(app, &detail, detail_width);
+    format!("{prefix}{title_detail}")
+}
+
+fn scrolling_text(app: &mut App, value: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let value_len = value.chars().count();
+    let key = format!("{width}:{value}");
+    if app.calls_title_scroll_key != key {
+        app.calls_title_scroll_key = key;
+        app.calls_title_scroll_offset = 0;
+        app.calls_title_scroll_tick = 0;
+    }
+
+    if value_len <= width {
+        app.calls_title_scroll_offset = 0;
+        app.calls_title_scroll_tick = 0;
+        return value.to_string();
+    }
+
+    let mut chars = value.chars().collect::<Vec<_>>();
+    chars.extend([' ', ' ', ' ']);
+    let offset = app.calls_title_scroll_offset % chars.len();
+    let rendered = (0..width)
+        .map(|idx| chars[(offset + idx) % chars.len()])
+        .collect::<String>();
+
+    app.calls_title_scroll_tick = app.calls_title_scroll_tick.wrapping_add(1);
+    if app.calls_title_scroll_tick % 2 == 0 {
+        app.calls_title_scroll_offset = (offset + 1) % chars.len();
+    }
+    rendered
 }
 
 fn draw_context(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
