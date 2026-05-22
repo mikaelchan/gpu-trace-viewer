@@ -11,6 +11,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::{Frame, Terminal};
 
@@ -363,6 +364,7 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
             Constraint::Length(4),
             Constraint::Min(12),
             Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .split(frame.area());
 
@@ -398,15 +400,10 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(5),
-            Constraint::Length(6),
-            Constraint::Length(8),
-        ])
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(body[1]);
     draw_calls(frame, right[0], app);
     draw_context(frame, right[1], app);
-    draw_call_stats(frame, right[2], app);
 
     let prompt = match app.input_mode {
         InputMode::Normal => app.status.clone(),
@@ -414,6 +411,7 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
         InputMode::CallOrder => format!("call_order> {}", app.input),
     };
     frame.render_widget(Paragraph::new(prompt), root[2]);
+    draw_call_stats(frame, root[3], app);
 }
 
 fn draw_summary(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -456,10 +454,7 @@ fn draw_summary(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
 }
 
 fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
-    let header = Row::new([
-        "Order", "Idx", "Dev", "Stream", "Dev us", "Free us", "Occ", "Kernel",
-    ])
-    .style(
+    let header = Row::new(["Order", "Idx", "Dev", "Stream", "Dev us", "Free us", "Occ"]).style(
         Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
@@ -473,13 +468,19 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             Cell::from(format!("{:.3}", row.device_time_us)),
             Cell::from(format!("{:.3}", row.free_time_us)),
             Cell::from(opt(row.occupancy_pct)),
-            Cell::from(trunc(&row.op_name, 64)),
         ])
     });
-    let title = if app.focus == Focus::Calls {
-        "Calls *"
+    let title_detail = if let Some(order) = app.call_order {
+        format!("call_order {order}")
+    } else if let Some(op) = app.selected_op.as_deref() {
+        trunc(op, 72)
     } else {
-        "Calls"
+        "all kernels".to_string()
+    };
+    let title = if app.focus == Focus::Calls {
+        format!("Calls * - {title_detail}")
+    } else {
+        format!("Calls - {title_detail}")
     };
     let table = Table::new(
         rows,
@@ -491,7 +492,6 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             Constraint::Length(10),
             Constraint::Length(10),
             Constraint::Length(8),
-            Constraint::Min(20),
         ],
     )
     .header(header)
@@ -546,27 +546,36 @@ fn draw_context(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
 
 fn draw_call_stats(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let stats = &app.call_stats;
-    let body = format!(
-        "count {}  total {}\nmin   {}  mean {}\nmax   {}  p50  {}\np75   {}  p95  {}\np99   {}  p99.9 {}",
-        stats.count,
-        fmt_us(Some(stats.total)),
-        fmt_us(stats.min),
-        fmt_us(stats.mean),
-        fmt_us(stats.max),
-        fmt_us(stats.p50),
-        fmt_us(stats.p75),
-        fmt_us(stats.p95),
-        fmt_us(stats.p99),
-        fmt_us(stats.p999),
-    );
-    frame.render_widget(
-        Paragraph::new(body).block(
-            Block::default()
-                .title("Device time stats")
-                .borders(Borders::ALL),
-        ),
-        area,
-    );
+    let label = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let value = Style::default().fg(Color::White);
+    let sep = Style::default().fg(Color::DarkGray);
+    let line = Line::from(vec![
+        Span::styled("device stats ", label),
+        Span::styled("count ", label),
+        Span::styled(stats.count.to_string(), value),
+        Span::styled("  total ", label),
+        Span::styled(fmt_us(Some(stats.total)), value),
+        Span::styled("  min ", label),
+        Span::styled(fmt_us(stats.min), value),
+        Span::styled("  mean ", label),
+        Span::styled(fmt_us(stats.mean), value),
+        Span::styled("  max ", label),
+        Span::styled(fmt_us(stats.max), value),
+        Span::styled("  p50 ", label),
+        Span::styled(fmt_us(stats.p50), value),
+        Span::styled("  p75 ", label),
+        Span::styled(fmt_us(stats.p75), value),
+        Span::styled("  p95 ", label),
+        Span::styled(fmt_us(stats.p95), value),
+        Span::styled("  p99 ", label),
+        Span::styled(fmt_us(stats.p99), value),
+        Span::styled("  p99.9 ", label),
+        Span::styled(fmt_us(stats.p999), value),
+        Span::styled(" us", sep),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn select_first(state: &mut TableState, len: usize) {

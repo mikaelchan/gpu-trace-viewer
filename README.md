@@ -38,7 +38,8 @@ If no subcommand is provided, the binary opens the TUI.
 - `c`: clear filter, selected op, and call-order query
 
 Selecting a call row automatically shows the `call_order +/- 5` context panel.
-The bottom-right stats panel shows device-time count, total, min, mean, max, p50, p75, p95, p99, and p99.9 for the current Calls query.
+The Calls panel title shows the selected kernel or exact `call_order` query.
+The bottom stats row shows device-time count, total, min, mean, max, p50, p75, p95, p99, and p99.9 for the current Calls query.
 
 ## Web Server
 
