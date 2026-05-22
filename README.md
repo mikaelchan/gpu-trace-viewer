@@ -2,6 +2,10 @@
 
 Rust terminal and web viewer for `gpu_trace_stats.sqlite` databases produced by the Python importer.
 
+## Preview
+
+![GPU Trace Viewer TUI](docs/tui.png)
+
 ## Install
 
 ```bash
