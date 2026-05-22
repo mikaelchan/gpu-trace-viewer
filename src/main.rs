@@ -17,7 +17,7 @@ struct Cli {
     db: Option<PathBuf>,
 
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -74,8 +74,12 @@ fn default_db_path() -> PathBuf {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let db_path = cli.db.unwrap_or_else(default_db_path);
+    let command = cli.command.unwrap_or(Command::Tui {
+        summary_limit: 200,
+        calls_limit: 200,
+    });
 
-    match cli.command {
+    match command {
         Command::Tui {
             summary_limit,
             calls_limit,

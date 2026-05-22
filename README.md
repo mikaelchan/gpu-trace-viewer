@@ -13,7 +13,8 @@ This installs `gpu-trace-viewer` into `~/.cargo/bin`.
 ## Commands
 
 ```bash
-gpu-trace-viewer --db ../gpu_trace_stats.sqlite tui
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite
+gpu-trace-viewer --db ../gpu_trace_stats.sqlite tui --summary-limit 500 --calls-limit 500
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite serve --host 127.0.0.1 --port 8766
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite runs
 gpu-trace-viewer --db ../gpu_trace_stats.sqlite top --by first --limit 10
@@ -21,6 +22,7 @@ gpu-trace-viewer --db ../gpu_trace_stats.sqlite calls --call-order 10
 ```
 
 If `--db` is omitted, the binary looks for `gpu_trace_stats.sqlite` in the current directory and then `../gpu_trace_stats.sqlite`.
+If no subcommand is provided, the binary opens the TUI.
 
 ## TUI Keys
 
