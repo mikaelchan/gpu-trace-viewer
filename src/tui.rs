@@ -369,7 +369,7 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
         .split(root[1]);
 
     draw_summary(frame, body[0], app);
@@ -524,7 +524,11 @@ fn draw_summary(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
 }
 
 fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
-    let header = Row::new(["Order", "Idx", "Dev", "Stream", "Dev us", "Free us", "Occ"]).style(
+    let header = Row::new([
+        "Order", "Dev", "Stream", "Dev us", "Free us", "Occ", "Blk/SM", "Warp/SM", "Shmem", "Grid",
+        "Block",
+    ])
+    .style(
         Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
@@ -532,16 +536,27 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let rows = app.calls.iter().map(|row| {
         Row::new(vec![
             Cell::from(row.call_order.to_string()),
-            Cell::from(row.op_call_index.to_string()),
             Cell::from(row.device.clone().unwrap_or_default()),
             Cell::from(row.stream.clone().unwrap_or_default()),
             Cell::from(format!("{:.3}", row.device_time_us)),
             Cell::from(format!("{:.3}", row.free_time_us)),
             Cell::from(opt(row.occupancy_pct)),
+            Cell::from(opt(row.blocks_per_sm)),
+            Cell::from(opt(row.warps_per_sm)),
+            Cell::from(fmt_intish(row.shared_memory)),
+            Cell::from(row.grid.clone().unwrap_or_default()),
+            Cell::from(row.block.clone().unwrap_or_default()),
         ])
     });
-    let title_detail = if let Some(order) = app.call_order {
-        format!("call_order {order}")
+    let title_detail = if app.call_order.is_some() {
+        app.calls
+            .first()
+            .map(|row| trunc(&row.op_name, 72))
+            .unwrap_or_else(|| {
+                app.call_order
+                    .map(|order| format!("call_order {order}"))
+                    .unwrap_or_else(|| "all kernels".to_string())
+            })
     } else if let Some(op) = app.selected_op.as_deref() {
         trunc(op, 72)
     } else {
@@ -556,12 +571,16 @@ fn draw_calls(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         rows,
         [
             Constraint::Length(8),
-            Constraint::Length(6),
             Constraint::Length(5),
             Constraint::Length(7),
             Constraint::Length(10),
             Constraint::Length(10),
+            Constraint::Length(6),
             Constraint::Length(8),
+            Constraint::Length(9),
+            Constraint::Length(9),
+            Constraint::Length(12),
+            Constraint::Length(12),
         ],
     )
     .header(header)
@@ -682,6 +701,18 @@ fn fmt_us(value: Option<f64>) -> String {
     value
         .map(|v| format!("{v:.3}"))
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_intish(value: Option<f64>) -> String {
+    value
+        .map(|v| {
+            if (v.fract()).abs() < f64::EPSILON {
+                format!("{v:.0}")
+            } else {
+                format!("{v:.3}")
+            }
+        })
+        .unwrap_or_default()
 }
 
 fn empty_dash(value: &str) -> String {

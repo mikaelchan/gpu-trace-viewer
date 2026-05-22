@@ -24,6 +24,11 @@ const CALL_COLUMNS: &[&str] = &[
     "op_name",
     "device_time_us",
     "occupancy_pct",
+    "blocks_per_sm",
+    "warps_per_sm",
+    "shared_memory",
+    "grid",
+    "block",
     "free_time_us",
     "total_time_us",
     "start_ts_us",
@@ -124,6 +129,11 @@ struct DeviceEvent {
     op_name: String,
     device_time_us: f64,
     occupancy_pct: Option<f64>,
+    blocks_per_sm: Option<f64>,
+    warps_per_sm: Option<f64>,
+    shared_memory: Option<f64>,
+    grid: Option<String>,
+    block: Option<String>,
     start_us: f64,
     end_us: f64,
     device: String,
@@ -143,6 +153,11 @@ struct CallRecord {
     op_name: String,
     device_time_us: f64,
     occupancy_pct: Option<f64>,
+    blocks_per_sm: Option<f64>,
+    warps_per_sm: Option<f64>,
+    shared_memory: Option<f64>,
+    grid: Option<String>,
+    block: Option<String>,
     free_time_us: f64,
     total_time_us: f64,
     start_ts_us: Option<f64>,
@@ -346,6 +361,11 @@ pub fn import_trace(options: ImportTraceOptions) -> Result<ImportResult> {
             op_name: device_event.op_name,
             device_time_us: device_event.device_time_us,
             occupancy_pct: device_event.occupancy_pct,
+            blocks_per_sm: device_event.blocks_per_sm,
+            warps_per_sm: device_event.warps_per_sm,
+            shared_memory: device_event.shared_memory,
+            grid: device_event.grid,
+            block: device_event.block,
             free_time_us,
             total_time_us,
             start_ts_us: Some(device_event.start_us),
@@ -418,6 +438,9 @@ pub fn import_csv(options: ImportCsvOptions) -> Result<ImportResult> {
         let free_time_us = parse_float(&row, &["free_time_us"], 0.0);
         let total_time_us = parse_float(&row, &["total_time_us"], device_time_us + free_time_us);
         let occupancy_pct = parse_optional_float(&row, &["occupancy_pct", "occupancy"]);
+        let blocks_per_sm = parse_optional_float(&row, &["blocks_per_sm", "blocks per SM"]);
+        let warps_per_sm = parse_optional_float(&row, &["warps_per_sm", "warps per SM"]);
+        let shared_memory = parse_optional_float(&row, &["shared_memory", "shared memory"]);
         let start_ts_us = parse_float(&row, &["start_ts_us", "ts_us"], 0.0);
         let end_ts_us = parse_float(&row, &["end_ts_us"], start_ts_us + device_time_us);
         let op_call_index = add_summary(
@@ -439,6 +462,11 @@ pub fn import_csv(options: ImportCsvOptions) -> Result<ImportResult> {
             op_name,
             device_time_us,
             occupancy_pct,
+            blocks_per_sm,
+            warps_per_sm,
+            shared_memory,
+            grid: parse_optional_text(&row, &["grid"]),
+            block: parse_optional_text(&row, &["block"]),
             free_time_us,
             total_time_us,
             start_ts_us: Some(start_ts_us),
@@ -661,6 +689,9 @@ fn parse_device_event(event: Value, categories: Option<&HashSet<String>>) -> Opt
 
     let args = object.get("args").and_then(Value::as_object);
     let occupancy_pct = parse_occupancy_pct(args);
+    let blocks_per_sm = parse_arg_float(args, "blocks per SM");
+    let warps_per_sm = parse_arg_float(args, "warps per SM");
+    let shared_memory = parse_arg_float(args, "shared memory");
     let device = trace_value_to_string(arg_or(args, object, "device", "pid")).unwrap_or_default();
     let stream = trace_value_to_string(arg_or(args, object, "stream", "tid")).unwrap_or_default();
 
@@ -669,6 +700,15 @@ fn parse_device_event(event: Value, categories: Option<&HashSet<String>>) -> Opt
         op_name: trace_value_to_string(Some(name)).unwrap_or_default(),
         device_time_us,
         occupancy_pct,
+        blocks_per_sm,
+        warps_per_sm,
+        shared_memory,
+        grid: args
+            .and_then(|args| args.get("grid"))
+            .and_then(trace_dim_to_string),
+        block: args
+            .and_then(|args| args.get("block"))
+            .and_then(trace_dim_to_string),
         start_us,
         end_us: start_us + device_time_us,
         device,
@@ -710,6 +750,26 @@ fn parse_occupancy_pct(args: Option<&Map<String, Value>>) -> Option<f64> {
         }
     }
     None
+}
+
+fn parse_arg_float(args: Option<&Map<String, Value>>, key: &str) -> Option<f64> {
+    let value = args?.get(key)?;
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|value| value.parse::<f64>().ok()))
+}
+
+fn trace_dim_to_string(value: &Value) -> Option<String> {
+    if let Some(items) = value.as_array() {
+        return Some(
+            items
+                .iter()
+                .filter_map(|item| trace_value_to_string(Some(item)))
+                .collect::<Vec<_>>()
+                .join("x"),
+        );
+    }
+    trace_value_to_string(Some(value)).filter(|value| !value.is_empty())
 }
 
 fn trace_value_to_string(value: Option<&Value>) -> Option<String> {
@@ -799,6 +859,11 @@ fn flush_calls(tx: &Transaction<'_>, batch: &mut Vec<CallRecord>) -> Result<()> 
             row.op_name,
             row.device_time_us,
             row.occupancy_pct,
+            row.blocks_per_sm,
+            row.warps_per_sm,
+            row.shared_memory,
+            row.grid,
+            row.block,
             row.free_time_us,
             row.total_time_us,
             row.start_ts_us,
@@ -876,6 +941,14 @@ fn parse_optional_float(row: &HashMap<String, String>, names: &[&str]) -> Option
         .find_map(|name| row.get(*name))
         .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<f64>().ok())
+}
+
+fn parse_optional_text(row: &HashMap<String, String>, names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|name| row.get(*name))
+        .filter(|value| !value.is_empty())
+        .cloned()
 }
 
 fn parse_text(row: &HashMap<String, String>, names: &[&str], default: &str) -> String {

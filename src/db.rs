@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS gpu_calls (
     op_name TEXT NOT NULL,
     device_time_us REAL NOT NULL,
     occupancy_pct REAL,
+    blocks_per_sm REAL,
+    warps_per_sm REAL,
+    shared_memory REAL,
+    grid TEXT,
+    block TEXT,
     free_time_us REAL NOT NULL,
     total_time_us REAL NOT NULL,
     start_ts_us REAL,
@@ -131,6 +136,11 @@ pub struct CallRow {
     pub op_name: String,
     pub device_time_us: f64,
     pub occupancy_pct: Option<f64>,
+    pub blocks_per_sm: Option<f64>,
+    pub warps_per_sm: Option<f64>,
+    pub shared_memory: Option<f64>,
+    pub grid: Option<String>,
+    pub block: Option<String>,
     pub free_time_us: f64,
     pub total_time_us: f64,
     pub start_ts_us: Option<f64>,
@@ -239,6 +249,9 @@ pub struct Db {
 
 impl Db {
     pub fn open_readonly(path: &Path) -> Result<Self> {
+        if path.exists() {
+            let _ = Self::open_readwrite(path);
+        }
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("open sqlite db {}", path.display()))?;
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA foreign_keys = ON;")?;
@@ -263,9 +276,19 @@ impl Db {
 
     fn ensure_schema(&self) -> Result<()> {
         let call_columns = self.columns("gpu_calls")?;
-        if !call_columns.is_empty() && !call_columns.contains("occupancy_pct") {
-            self.conn
-                .execute_batch("ALTER TABLE gpu_calls ADD COLUMN occupancy_pct REAL;")?;
+        for (column, kind) in [
+            ("occupancy_pct", "REAL"),
+            ("blocks_per_sm", "REAL"),
+            ("warps_per_sm", "REAL"),
+            ("shared_memory", "REAL"),
+            ("grid", "TEXT"),
+            ("block", "TEXT"),
+        ] {
+            if !call_columns.is_empty() && !call_columns.contains(column) {
+                self.conn.execute_batch(&format!(
+                    "ALTER TABLE gpu_calls ADD COLUMN {column} {kind};"
+                ))?;
+            }
         }
 
         let summary_columns = self.columns("op_summary")?;
@@ -390,7 +413,8 @@ impl Db {
     ) -> Result<Vec<CallRow>> {
         let mut sql = String::from(
             "SELECT run_id, call_order, op_call_index, category, op_name, device_time_us, \
-                    occupancy_pct, free_time_us, total_time_us, start_ts_us, end_ts_us, \
+                    occupancy_pct, blocks_per_sm, warps_per_sm, shared_memory, grid, block, \
+                    free_time_us, total_time_us, start_ts_us, end_ts_us, \
                     device, stream, pid, tid, correlation, external_id \
              FROM gpu_calls WHERE run_id = ?",
         );
@@ -453,7 +477,8 @@ impl Db {
         let hi = call_order + radius.max(1);
         let mut stmt = self.conn.prepare(
             "SELECT run_id, call_order, op_call_index, category, op_name, device_time_us, \
-                    occupancy_pct, free_time_us, total_time_us, start_ts_us, end_ts_us, \
+                    occupancy_pct, blocks_per_sm, warps_per_sm, shared_memory, grid, block, \
+                    free_time_us, total_time_us, start_ts_us, end_ts_us, \
                     device, stream, pid, tid, correlation, external_id \
              FROM gpu_calls WHERE run_id = ? AND call_order BETWEEN ? AND ? \
              ORDER BY call_order ASC",
@@ -510,6 +535,11 @@ fn map_call_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CallRow> {
         op_name: row.get("op_name")?,
         device_time_us: row.get("device_time_us")?,
         occupancy_pct: row.get("occupancy_pct")?,
+        blocks_per_sm: row.get("blocks_per_sm")?,
+        warps_per_sm: row.get("warps_per_sm")?,
+        shared_memory: row.get("shared_memory")?,
+        grid: row.get("grid")?,
+        block: row.get("block")?,
         free_time_us: row.get("free_time_us")?,
         total_time_us: row.get("total_time_us")?,
         start_ts_us: row.get("start_ts_us")?,

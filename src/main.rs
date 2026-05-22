@@ -183,12 +183,13 @@ fn main() -> Result<()> {
                 offset,
             )?;
             println!("run_id: {run_id}");
-            println!("order\tidx\tdevice\tstream\tdevice_us\tfree_us\ttotal_us\tocc_pct\top");
+            println!(
+                "order\tdevice\tstream\tdevice_us\tfree_us\ttotal_us\tocc_pct\tblocks_per_sm\twarps_per_sm\tshared_memory\tgrid\tblock\top"
+            );
             for row in rows {
                 println!(
-                    "{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{}\t{}",
+                    "{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     row.call_order,
-                    row.op_call_index,
                     row.device.unwrap_or_default(),
                     row.stream.unwrap_or_default(),
                     row.device_time_us,
@@ -197,6 +198,17 @@ fn main() -> Result<()> {
                     row.occupancy_pct
                         .map(|v| format!("{v:.3}"))
                         .unwrap_or_default(),
+                    row.blocks_per_sm
+                        .map(|v| format!("{v:.3}"))
+                        .unwrap_or_default(),
+                    row.warps_per_sm
+                        .map(|v| format!("{v:.3}"))
+                        .unwrap_or_default(),
+                    row.shared_memory
+                        .map(|v| format!("{v:.0}"))
+                        .unwrap_or_default(),
+                    row.grid.unwrap_or_default(),
+                    row.block.unwrap_or_default(),
                     row.op_name
                 );
             }
